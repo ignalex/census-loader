@@ -15,7 +15,7 @@ BUILDID = "medium_1_2"
 # KEY_PAIR_NAME = "Default"
 AVAILABILITY_ZONE = "ap-southeast-2a"  # Sydney, AU
 PEM_FILE = "/Users/hugh.saalmans/.aws/LightsailDefaultPrivateKey-ap-southeast-2.pem"
-INSTANCE_NAME = "census_loader_instance_v2"
+INSTANCE_NAME = "census_loader_instance"
 
 
 def main():
@@ -55,26 +55,33 @@ def main():
     time.sleep(30)
 
     instance_ip = instance_dict["publicIpAddress"]
+    cpu_count = instance_dict["hardware"]["cpuCount"]
     logger.info("\t\tPublic IP address: {0}".format(instance_ip))
 
+    # create SSH client
     key = paramiko.RSAKey.from_private_key_file(PEM_FILE)
     ssh_client = paramiko.SSHClient()
     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    # Here 'ubuntu' is user name and 'instance_ip' is public IP of EC2
     ssh_client.connect(hostname=instance_ip, username="ubuntu", pkey=key)
-    # logger.info('\t\tConnected via SSH')
+
+    logger.info("Connected to new server via SSH : {0}".format(datetime.now() - full_start_time))
+    logger.info("")
 
     # run each bash command
     bash_file = os.path.abspath(__file__).replace(".py", ".sh")
     bash_commands = open(bash_file, 'r').read().split("\n")
 
-    logger.info("Connected to new server via SSH : {0}".format(datetime.now() - full_start_time))
-    logger.info("")
-
     for cmd in bash_commands:
         if cmd[:1] != "#" and cmd[:1].strip(" ") != "":  # ignore comments and blank lines
             run_ssh_command(ssh_client, cmd)
+
+    # data and code loaded - run the thing using gunicorn!
+    cmd = "sudo gunicorn -w {0} -D --pythonpath ~/git/census-loader/web/ -b 0.0.0.0:80 single_server:app"\
+        .format(cpu_count * 2)
+    run_ssh_command(ssh_client, cmd)
+
+    # TODO: Put NGINX in front of gunicorn as a reverse proxy"
 
     ssh_client.close()
 
@@ -112,8 +119,9 @@ def run_ssh_command(ssh_client, cmd):
     stdin.close()
 
     for line in stdout.read().splitlines():
-        if line:
-            logger.info("\t\t{0}".format(line))
+        pass
+        # if line:
+        #     logger.info("\t\t{0}".format(line))
     stdout.close()
 
     for line in stderr.read().splitlines():
